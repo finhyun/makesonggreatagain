@@ -1,0 +1,72 @@
+# ===== 개인 설정 파일 =====
+# 이 레포의 CLAUDE.local.md는 개인 선호 설정이라 Git에 올리지 않음
+CLAUDE.local.md
+
+# Claude Code의 개인 설정 (권한 허용 목록 등)
+.claude/settings.local.json
+.claude/state/
+.claude/logs/
+
+# 온보딩 스킬의 진행 상태 (개인별로 다름)
+.claude/skills/onboard-donghyun/state/
+
+# ===== 시크릿 / 환경변수 =====
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+credentials.json
+secrets.json
+
+# ===== OS 잡파일 =====
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+._*
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# ===== 에디터 =====
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ===== 언어별 =====
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+env/
+
+# ===== 빌드 / 배포 =====
+dist/
+build/
+out/
+*.log
+
+# ===== 기타 =====
+# 임시 파일
+tmp/
+temp/
+*.tmp
+*.bak
