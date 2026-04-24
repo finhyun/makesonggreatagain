@@ -1,0 +1,681 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <title>낚시 시뮬레이터</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #1a1a2e;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      font-family: 'Segoe UI', sans-serif;
+      color: white;
+    }
+    h1 { font-size: 1.8rem; margin-bottom: 8px; letter-spacing: 2px; }
+    #subtitle { color: #aaa; font-size: 0.85rem; margin-bottom: 16px; }
+    #game-wrapper { display: flex; gap: 20px; align-items: flex-start; }
+    canvas { border: 2px solid #16213e; border-radius: 12px; display: block; }
+    #ui { width: 200px; }
+    #status-box {
+      background: #16213e;
+      border-radius: 10px;
+      padding: 14px;
+      margin-bottom: 12px;
+      text-align: center;
+      min-height: 70px;
+    }
+    #status-text { font-size: 0.95rem; line-height: 1.6; white-space: pre-line; }
+    #catch-bar-container { display: none; margin-top: 10px; }
+    #catch-bar-bg {
+      background: #0f3460;
+      border-radius: 6px;
+      height: 18px;
+      overflow: hidden;
+      position: relative;
+    }
+    #catch-bar-zone {
+      position: absolute;
+      height: 100%;
+      background: #22c55e;
+      opacity: 0.5;
+      border-radius: 6px;
+    }
+    #catch-bar-cursor {
+      position: absolute;
+      width: 6px;
+      height: 100%;
+      background: #facc15;
+      border-radius: 3px;
+    }
+    #score-box { background: #16213e; border-radius: 10px; padding: 14px; margin-bottom: 12px; }
+    #score-box h3 { font-size: 0.8rem; color: #aaa; margin-bottom: 6px; }
+    #score { font-size: 1.5rem; font-weight: bold; color: #facc15; }
+    #catalog { background: #16213e; border-radius: 10px; padding: 14px; }
+    #catalog h3 { font-size: 0.8rem; color: #aaa; margin-bottom: 8px; }
+    #fish-list { font-size: 0.85rem; line-height: 1.8; }
+    #fish-list .fish-entry { display: flex; justify-content: space-between; }
+    #fish-list .fish-entry .count { color: #60a5fa; }
+    #btn {
+      width: 100%;
+      padding: 12px;
+      font-size: 1rem;
+      font-weight: bold;
+      border: none;
+      border-radius: 10px;
+      background: #0f3460;
+      color: white;
+      cursor: pointer;
+      margin-bottom: 12px;
+      transition: background 0.2s;
+    }
+    #btn:hover:not(:disabled) { background: #1a5276; }
+    #btn:active:not(:disabled) { background: #2980b9; }
+    #btn:disabled { background: #1c2a3a; color: #445; cursor: default; }
+  </style>
+</head>
+<body>
+  <h1>🎣 낚시 시뮬레이터</h1>
+  <p id="subtitle">스페이스바 또는 버튼으로 낚시!</p>
+  <div id="game-wrapper">
+    <canvas id="canvas" width="420" height="500"></canvas>
+    <div id="ui">
+      <div id="status-box">
+        <div id="status-text">낚싯대를 던져보세요!</div>
+        <div id="catch-bar-container">
+          <div id="catch-bar-bg">
+            <div id="catch-bar-zone"></div>
+            <div id="catch-bar-cursor"></div>
+          </div>
+          <div style="font-size:0.7rem;color:#aaa;margin-top:4px;">노란색이 초록 구간에 있을 때 클릭!</div>
+        </div>
+      </div>
+      <button id="btn">🎣 낚싯대 던지기</button>
+      <div id="score-box">
+        <h3>총 점수</h3>
+        <div id="score">0</div>
+      </div>
+      <div id="catalog">
+        <h3>물고기 도감</h3>
+        <div id="fish-list">아직 아무것도 못 잡았어요...</div>
+      </div>
+    </div>
+  </div>
+
+<script>
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const btn = document.getElementById('btn');
+const statusText = document.getElementById('status-text');
+const catchBarContainer = document.getElementById('catch-bar-container');
+const catchBarZone = document.getElementById('catch-bar-zone');
+const catchBarCursor = document.getElementById('catch-bar-cursor');
+const scoreEl = document.getElementById('score');
+const fishListEl = document.getElementById('fish-list');
+
+const FISH_TYPES = [
+  { name: '피라미',   emoji: '🐟', color: '#60a5fa', rarity: 'common',    points: 10,  size: 18 },
+  { name: '붕어',     emoji: '🐠', color: '#f97316', rarity: 'common',    points: 20,  size: 22 },
+  { name: '잉어',     emoji: '🐡', color: '#a78bfa', rarity: 'uncommon',  points: 50,  size: 28 },
+  { name: '배스',     emoji: '🦈', color: '#6b7280', rarity: 'uncommon',  points: 80,  size: 26 },
+  { name: '연어',     emoji: '🐟', color: '#f43f5e', rarity: 'rare',      points: 150, size: 30 },
+  { name: '황금잉어', emoji: '✨', color: '#fbbf24', rarity: 'legendary', points: 500, size: 32 },
+];
+
+const RARITY_WEIGHTS = { common: 50, uncommon: 30, rare: 15, legendary: 5 };
+const RARITY_SPEED  = { common: 1.0, uncommon: 1.3, rare: 1.6, legendary: 2.0 };
+
+// States: idle | casting | waiting | approaching | biting | catching | pulling | result | escaped
+let state = 'idle';
+let score = 0;
+let catalog = {};
+
+const HOOK_X = 210;
+let hookY = 80;
+let hookTargetY = 340;
+let castProgress = 0;
+
+let approachFish = null; // { type, x, y, startX, startY, dir, progress }
+let escapeTimer = 0;
+const ESCAPE_TIME = 3500;
+let shakeT = 0;
+
+let catchCursor = 0;
+let catchDir = 1;
+let catchZoneStart = 0;
+let catchZoneWidth = 0;
+
+let pullProgress = 0;
+let caughtFishType = null;
+
+let resultTimer = 0;
+let ripples = [];
+let bgFish = [];
+let lastTime = 0;
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+function pickFishType() {
+  let total = Object.values(RARITY_WEIGHTS).reduce((a, b) => a + b, 0);
+  let r = Math.random() * total;
+  for (const type of FISH_TYPES) {
+    r -= RARITY_WEIGHTS[type.rarity];
+    if (r <= 0) return type;
+  }
+  return FISH_TYPES[0];
+}
+
+function lerp(a, b, t) { return a + (b - a) * t; }
+function easeOut(t) { return 1 - (1 - t) * (1 - t); }
+
+// ── State transitions ────────────────────────────────────────────────────────
+
+function doCast() {
+  state = 'casting';
+  castProgress = 0;
+  hookY = 80;
+  hookTargetY = 290 + Math.random() * 120;
+  btn.disabled = true;
+  btn.textContent = '⏳ 기다리는 중...';
+  statusText.textContent = '미끼를 던졌어요!\n물고기를 기다리는 중...';
+  ripples = [];
+}
+
+function startApproaching() {
+  // 화면 안에 있는 bgFish 중 하나를 선택
+  const visible = bgFish.filter(f => f.x > 20 && f.x < canvas.width - 20);
+  const pool = visible.length > 0 ? visible : bgFish;
+
+  if (pool.length === 0) {
+    // 물고기가 전혀 없을 때 비상 폴백: 화면 밖에서 등장
+    const type = pickFishType();
+    const fromLeft = Math.random() < 0.5;
+    approachFish = {
+      type, progress: 0, noticeTimer: 0,
+      x: fromLeft ? -50 : canvas.width + 50,
+      y: hookTargetY + (Math.random() - 0.5) * 60,
+      dir: fromLeft ? 1 : -1,
+    };
+    approachFish.startX = approachFish.x;
+    approachFish.startY = approachFish.y;
+    state = 'approaching';
+    statusText.textContent = `${approachFish.type.emoji} ${approachFish.type.name}이(가)\n미끼에 다가오고 있어요!`;
+    return;
+  }
+
+  // 헤엄치던 물고기 중 하나 낚아채기
+  const picked = pool[Math.floor(Math.random() * pool.length)];
+  bgFish.splice(bgFish.indexOf(picked), 1);
+
+  approachFish = {
+    type: picked.type,
+    x: picked.x,
+    y: picked.y,
+    startX: picked.x,
+    startY: picked.y,
+    dir: picked.x <= HOOK_X ? 1 : -1, // 바늘 방향으로 몸 돌림
+    progress: 0,
+    noticeTimer: 650, // 잠깐 "!" 표시 후 출발
+  };
+  state = 'approaching';
+  statusText.textContent = `${picked.type.emoji} ${picked.type.name}이(가)\n미끼를 발견했어요!`;
+}
+
+function startBiting() {
+  state = 'biting';
+  shakeT = 0;
+  escapeTimer = ESCAPE_TIME;
+  btn.disabled = false;
+  btn.textContent = '🎯 지금 당기기!';
+  statusText.textContent = `${approachFish.type.emoji} ${approachFish.type.name}이(가) 물었어요!\n지금 당겨요!`;
+  ripples.push({ x: HOOK_X, y: hookTargetY, r: 0, alpha: 1 });
+}
+
+function startCatching() {
+  state = 'catching';
+  shakeT = 0;
+  statusText.textContent = '줄을 당기고 있어요!\n초록 구간에서 클릭!';
+  catchBarContainer.style.display = 'block';
+  btn.textContent = '✊ 당기기!';
+
+  catchCursor = 0;
+  catchDir = 1;
+  const zoneW = 18 + Math.random() * 18;
+  const zoneStart = 10 + Math.random() * (100 - zoneW - 15);
+  catchZoneStart = zoneStart;
+  catchZoneWidth = zoneW;
+  catchBarZone.style.left = zoneStart + '%';
+  catchBarZone.style.width = zoneW + '%';
+  catchBarCursor.style.left = '0%';
+}
+
+function attemptCatch() {
+  catchBarContainer.style.display = 'none';
+  if (catchCursor >= catchZoneStart && catchCursor <= catchZoneStart + catchZoneWidth) {
+    startPulling();
+  } else {
+    fishEscaped(false);
+  }
+}
+
+function startPulling() {
+  state = 'pulling';
+  caughtFishType = approachFish.type;
+  pullProgress = 0;
+  btn.disabled = true;
+  btn.textContent = '🎣 끌어올리는 중!';
+  statusText.textContent = `${caughtFishType.emoji} ${caughtFishType.name} 잡았어요!\n끌어올리는 중...`;
+}
+
+function finishPulling() {
+  state = 'result';
+  resultTimer = 2800;
+  score += caughtFishType.points;
+  catalog[caughtFishType.name] = (catalog[caughtFishType.name] || 0) + 1;
+  updateCatalog();
+  scoreEl.textContent = score;
+  statusText.textContent = `🎉 ${caughtFishType.emoji} ${caughtFishType.name} 획득!\n+${caughtFishType.points}점!`;
+  btn.disabled = false;
+  btn.textContent = '✅ 다시 낚시하기';
+  ripples.push({ x: HOOK_X, y: 225, r: 0, alpha: 1 });
+}
+
+function fishEscaped(timeout) {
+  state = 'escaped';
+  resultTimer = 1500;
+  catchBarContainer.style.display = 'none';
+  statusText.textContent = timeout
+    ? `😱 ${approachFish.type.emoji} ${approachFish.type.name}이(가)\n도망갔어요!`
+    : '😢 타이밍을 놓쳤어요!\n물고기가 도망갔어요.';
+  btn.disabled = false;
+  btn.textContent = '🔄 다시 낚시하기';
+}
+
+function resetIdle() {
+  state = 'idle';
+  approachFish = null;
+  caughtFishType = null;
+  hookY = 80;
+  btn.disabled = false;
+  btn.textContent = '🎣 낚싯대 던지기';
+  statusText.textContent = '낚싯대를 던져보세요!';
+}
+
+function doAction() {
+  if (state === 'idle')                    doCast();
+  else if (state === 'biting')             startCatching();
+  else if (state === 'catching')           attemptCatch();
+  else if (state === 'result' || state === 'escaped') resetIdle();
+}
+
+// ── Catalog ──────────────────────────────────────────────────────────────────
+
+function updateCatalog() {
+  fishListEl.innerHTML = '';
+  for (const [name, count] of Object.entries(catalog)) {
+    const type = FISH_TYPES.find(f => f.name === name);
+    const div = document.createElement('div');
+    div.className = 'fish-entry';
+    div.innerHTML = `<span>${type.emoji} ${name}</span><span class="count">×${count}</span>`;
+    fishListEl.appendChild(div);
+  }
+}
+
+// ── Update ───────────────────────────────────────────────────────────────────
+
+function update(dt) {
+  // Background fish — 희귀도 가중치로 스폰 (물속 물고기가 잡힐 대상이므로)
+  if (Math.random() < 0.015 && bgFish.length < 10) {
+    const type = pickFishType();
+    const dir = Math.random() < 0.5 ? 1 : -1;
+    bgFish.push({
+      type, dir,
+      x: dir === 1 ? -50 : canvas.width + 50,
+      y: 255 + Math.random() * 210,
+      speed: 0.45 + Math.random() * 0.75,
+      wobble: Math.random() * Math.PI * 2,
+    });
+  }
+  bgFish = bgFish.filter(f => {
+    f.x += f.dir * f.speed;
+    f.wobble += 0.04;
+    return f.x > -80 && f.x < canvas.width + 80;
+  });
+
+  // Cast
+  if (state === 'casting') {
+    castProgress = Math.min(1, castProgress + dt * 0.0028);
+    hookY = lerp(80, hookTargetY, easeOut(castProgress));
+    if (castProgress >= 1) {
+      hookY = hookTargetY;
+      ripples.push({ x: HOOK_X, y: hookTargetY, r: 0, alpha: 1 });
+      state = 'waiting';
+      setTimeout(() => { if (state === 'waiting') startApproaching(); }, 1200 + Math.random() * 2500);
+    }
+  }
+
+  // Approach: 발견 후 잠깐 멈춤("!") → 바늘로 헤엄
+  if (state === 'approaching' && approachFish) {
+    if (approachFish.noticeTimer > 0) {
+      approachFish.noticeTimer -= dt;
+      // 발견 순간 startX/Y를 현재 위치로 고정 (아직 이동 안 함)
+    } else {
+      approachFish.progress = Math.min(1, approachFish.progress + dt * 0.00075);
+      const p = easeOut(approachFish.progress);
+      approachFish.x = lerp(approachFish.startX, HOOK_X, p);
+      approachFish.y = lerp(approachFish.startY, hookTargetY, p);
+      if (approachFish.progress >= 1) startBiting();
+    }
+  }
+
+  // Biting: escape countdown
+  if (state === 'biting') {
+    escapeTimer -= dt;
+    shakeT += dt;
+    if (escapeTimer <= 0) fishEscaped(true);
+  }
+
+  // Catching: timing bar
+  if (state === 'catching') {
+    shakeT += dt;
+    const speed = RARITY_SPEED[approachFish.type.rarity] * 0.048;
+    catchCursor += catchDir * speed * dt;
+    if (catchCursor >= 100) { catchCursor = 100; catchDir = -1; }
+    if (catchCursor <= 0)   { catchCursor = 0;   catchDir =  1; }
+    catchBarCursor.style.left = catchCursor + '%';
+  }
+
+  // Pulling
+  if (state === 'pulling') {
+    pullProgress = Math.min(1, pullProgress + dt * 0.0018);
+    if (pullProgress >= 1) finishPulling();
+  }
+
+  // Timers
+  if (state === 'result' || state === 'escaped') {
+    resultTimer -= dt;
+  }
+
+  // Ripples
+  for (const r of ripples) { r.r += dt * 0.09; r.alpha = Math.max(0, 1 - r.r / 55); }
+  ripples = ripples.filter(r => r.alpha > 0);
+}
+
+// ── Drawing ──────────────────────────────────────────────────────────────────
+
+function drawFishShape(type, x, y, dir, wobble, mouthOpen, alpha) {
+  ctx.save();
+  if (alpha !== undefined) ctx.globalAlpha = alpha;
+  ctx.translate(x, y + Math.sin(wobble) * 3);
+  ctx.scale(dir, 1);
+
+  ctx.fillStyle = type.color;
+  ctx.beginPath();
+  ctx.ellipse(0, 0, type.size, type.size * 0.55, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.beginPath();
+  ctx.moveTo(-type.size * 0.8, 0);
+  ctx.lineTo(-type.size * 1.4, -type.size * 0.4);
+  ctx.lineTo(-type.size * 1.4,  type.size * 0.4);
+  ctx.closePath();
+  ctx.fill();
+
+  if (mouthOpen) {
+    ctx.fillStyle = '#ff3333';
+    ctx.beginPath();
+    ctx.ellipse(type.size * 0.9, type.size * 0.08, 4, 3, 0.3, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  ctx.fillStyle = 'white';
+  ctx.beginPath();
+  ctx.arc(type.size * 0.5, -type.size * 0.15, 3.5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#111';
+  ctx.beginPath();
+  ctx.arc(type.size * 0.52, -type.size * 0.15, 1.8, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.restore();
+}
+
+function drawBackground(t) {
+  const skyGrad = ctx.createLinearGradient(0, 0, 0, 205);
+  skyGrad.addColorStop(0, '#0c1445');
+  skyGrad.addColorStop(1, '#1a3a6e');
+  ctx.fillStyle = skyGrad;
+  ctx.fillRect(0, 0, canvas.width, 205);
+
+  ctx.fillStyle = '#c2a068';
+  ctx.fillRect(0, 195, canvas.width, 30);
+  ctx.fillStyle = '#a0845a';
+  ctx.fillRect(0, 218, canvas.width, 8);
+
+  const waterGrad = ctx.createLinearGradient(0, 225, 0, canvas.height);
+  waterGrad.addColorStop(0, '#1a5f8a');
+  waterGrad.addColorStop(1, '#0d3355');
+  ctx.fillStyle = waterGrad;
+  ctx.fillRect(0, 225, canvas.width, canvas.height - 225);
+
+  ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+  ctx.lineWidth = 1;
+  for (let i = 0; i < 8; i++) {
+    const wy = 235 + i * 35 + Math.sin(t * 0.001 + i) * 4;
+    ctx.beginPath(); ctx.moveTo(0, wy); ctx.lineTo(canvas.width, wy); ctx.stroke();
+  }
+}
+
+function drawFisherman() {
+  const fx = 50, fy = 185;
+  ctx.fillStyle = '#4a3728'; ctx.fillRect(fx - 8, fy - 30, 16, 28);
+  ctx.fillStyle = '#f0c27f';
+  ctx.beginPath(); ctx.arc(fx, fy - 36, 10, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#2d1e0f';
+  ctx.fillRect(fx - 14, fy - 48, 28, 6);
+  ctx.fillRect(fx - 8, fy - 62, 16, 16);
+  ctx.strokeStyle = '#8b5e3c'; ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.moveTo(fx + 6, fy - 28); ctx.lineTo(HOOK_X, 70); ctx.stroke();
+}
+
+function getShake() {
+  if (state === 'biting')   return Math.sin(shakeT * 0.022) * 6;
+  if (state === 'catching') return Math.sin(shakeT * 0.032) * 10;
+  return 0;
+}
+
+function drawLine() {
+  if (state === 'idle') return;
+  const shake = getShake();
+
+  let lx = HOOK_X + shake;
+  let ly = hookY;
+  if (state === 'waiting' || state === 'approaching')  ly = hookTargetY;
+  if (state === 'biting' || state === 'catching')      ly = hookTargetY;
+  if (state === 'pulling') {
+    ly = lerp(hookTargetY, 185, easeOut(pullProgress));
+    lx = HOOK_X + shake * (1 - pullProgress);
+  }
+
+  ctx.strokeStyle = 'rgba(200,200,200,0.6)'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(HOOK_X, 70); ctx.lineTo(lx, ly); ctx.stroke();
+
+  // Hook + 미끼 반짝임 (물고기 유인 시각 피드백)
+  if (state === 'casting' || state === 'waiting') {
+    ctx.strokeStyle = '#ccc'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(lx, ly + 6, 6, 0.2, Math.PI + 0.2); ctx.stroke();
+  }
+  if (state === 'waiting') {
+    const glow = (Math.sin(Date.now() * 0.004) + 1) / 2;
+    ctx.beginPath();
+    ctx.arc(lx, ly, 10 + glow * 5, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(255, 220, 80, ${0.08 + glow * 0.1})`;
+    ctx.fill();
+  }
+}
+
+function drawApproachingFish(t) {
+  if (state !== 'approaching' || !approachFish) return;
+  const { type, x, y, dir, progress, noticeTimer } = approachFish;
+
+  if (noticeTimer > 0) {
+    // 발견 단계: 빨간 "!" 표시, 물고기는 제자리에서 약간 흔들림
+    const pulse = (Math.sin(t * 0.025) + 1) / 2;
+    ctx.fillStyle = `rgba(255, 70, 70, ${0.7 + pulse * 0.3})`;
+    ctx.font = 'bold 18px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('!', x, y - type.size - 14);
+    // 발견하고 몸을 약간 흔드는 느낌
+    drawFishShape(type, x, y, dir, t * 0.003 + Math.sin(t * 0.01) * 0.5, false);
+  } else {
+    // 접근 단계: 바늘 쪽으로 헤엄, 가까워지면 입 벌림
+    if (progress < 0.8) {
+      const pulse = (Math.sin(t * 0.01) + 1) / 2;
+      ctx.fillStyle = `rgba(250,204,21,${0.4 + pulse * 0.5})`;
+      ctx.font = '12px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('▶', x + (dir > 0 ? type.size + 8 : -type.size - 8), y + 2);
+    }
+    const mouthOpen = progress > 0.7;
+    drawFishShape(type, x, y, dir, t * 0.001, mouthOpen);
+  }
+}
+
+function drawHookedFish(t) {
+  if (!approachFish || !['biting','catching','pulling'].includes(state)) return;
+  const shake = getShake();
+  const type = approachFish.type;
+
+  if (state === 'biting' || state === 'catching') {
+    // Fish hanging on hook, wiggling
+    drawFishShape(type, HOOK_X + shake, hookTargetY, -1, t * 0.002, false);
+
+    // Bubble effect
+    if (Math.random() < 0.04) {
+      ripples.push({ x: HOOK_X + shake + (Math.random()-0.5)*12, y: hookTargetY - 10, r: 0, alpha: 0.5 });
+    }
+  } else if (state === 'pulling') {
+    const fishY = lerp(hookTargetY, 175, easeOut(pullProgress));
+    const fishX = HOOK_X + shake * (1 - pullProgress);
+    ctx.save();
+    ctx.translate(fishX, fishY);
+    ctx.rotate(-pullProgress * 0.9);
+    drawFishShape(type, 0, 0, 1, 0, false);
+    ctx.restore();
+
+    // Splash particles as fish breaks surface
+    if (pullProgress > 0.55 && pullProgress < 0.7 && Math.random() < 0.3) {
+      ripples.push({ x: fishX + (Math.random()-0.5)*20, y: 230, r: 0, alpha: 0.7 });
+    }
+  }
+}
+
+function drawBiteAlert(t) {
+  if (state !== 'biting') return;
+  const ratio = Math.max(0, escapeTimer / ESCAPE_TIME);
+  const pulse = (Math.sin(t * 0.016) + 1) / 2;
+
+  // Escape timer bar above hook
+  const barW = 70;
+  const barX = HOOK_X - barW / 2;
+  const barY = hookTargetY - 40;
+  ctx.fillStyle = 'rgba(0,0,0,0.45)';
+  ctx.beginPath(); ctx.roundRect(barX - 2, barY - 2, barW + 4, 12, 4); ctx.fill();
+  ctx.fillStyle = ratio > 0.4 ? '#ef4444' : '#fbbf24';
+  ctx.beginPath(); ctx.roundRect(barX, barY, barW * ratio, 8, 3); ctx.fill();
+
+  // PULL text
+  ctx.fillStyle = `rgba(250,204,21,${0.7 + pulse * 0.3})`;
+  ctx.font = `bold ${16 + pulse * 5}px sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.fillText('당겨요!', HOOK_X, hookTargetY - 50);
+}
+
+function drawResultOverlay() {
+  if (state !== 'result' || !caughtFishType) return;
+  const age = 2800 - resultTimer;
+  const fadeIn = Math.min(1, age / 350);
+
+  ctx.fillStyle = `rgba(0,0,0,${0.52 * fadeIn})`;
+  ctx.fillRect(55, canvas.height / 2 - 75, canvas.width - 110, 138);
+
+  ctx.globalAlpha = fadeIn;
+  ctx.fillStyle = 'white';
+  ctx.font = 'bold 40px sans-serif'; ctx.textAlign = 'center';
+  ctx.fillText(caughtFishType.emoji, canvas.width / 2, canvas.height / 2 - 14);
+  ctx.font = 'bold 18px sans-serif';
+  ctx.fillText(caughtFishType.name + ' 획득!', canvas.width / 2, canvas.height / 2 + 20);
+  ctx.fillStyle = '#facc15';
+  ctx.font = 'bold 15px sans-serif';
+  ctx.fillText(`+${caughtFishType.points}점`, canvas.width / 2, canvas.height / 2 + 46);
+  ctx.globalAlpha = 1;
+}
+
+function drawRipples() {
+  for (const r of ripples) {
+    ctx.strokeStyle = `rgba(255,255,255,${r.alpha})`;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.arc(r.x, r.y, r.r, 0, Math.PI * 2); ctx.stroke();
+  }
+}
+
+// ── Render ───────────────────────────────────────────────────────────────────
+
+function render(t) {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  drawBackground(t);
+  drawFisherman();
+
+  for (const f of bgFish) {
+    drawFishShape(f.type, f.x, f.y, f.dir, f.wobble, false);
+  }
+
+  drawLine();
+  drawApproachingFish(t);
+  drawHookedFish(t);
+  drawRipples();
+  drawBiteAlert(t);
+  drawResultOverlay();
+
+  if (state === 'idle') {
+    ctx.fillStyle = 'rgba(255,255,255,0.2)';
+    ctx.font = '13px sans-serif'; ctx.textAlign = 'center';
+    ctx.fillText('물고기가 헤엄치고 있어요...', canvas.width / 2, 248);
+  }
+}
+
+// ── Main loop ─────────────────────────────────────────────────────────────────
+
+function loop(t) {
+  const dt = Math.min(t - lastTime, 50);
+  lastTime = t;
+  update(dt);
+  render(t);
+  requestAnimationFrame(loop);
+}
+
+btn.addEventListener('click', doAction);
+document.addEventListener('keydown', e => {
+  if (e.code === 'Space') { e.preventDefault(); doAction(); }
+});
+
+// 초기 배경 물고기 (희귀도 기반 스폰)
+for (let i = 0; i < 6; i++) {
+  const type = pickFishType();
+  const dir = Math.random() < 0.5 ? 1 : -1;
+  bgFish.push({
+    type, dir,
+    x: 30 + Math.random() * (canvas.width - 60),
+    y: 260 + Math.random() * 205,
+    speed: 0.4 + Math.random() * 0.65,
+    wobble: Math.random() * Math.PI * 2,
+  });
+}
+
+requestAnimationFrame(t => { lastTime = t; requestAnimationFrame(loop); });
+</script>
+</body>
+</html>
