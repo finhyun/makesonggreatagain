@@ -1,0 +1,73 @@
+=== Ralph Progress Log: tower-stack 4-round 보강 ===
+Started: 2026-04-26
+
+[Baseline] Codex(omc ask codex)가 Easy/Normal/Hard 모드 + 로컬 2인 Split-Screen 배틀모드를 구현 완료한 상태에서 시작.
+- 파일: /Users/finito/dev/makesonggreatagain/user/donghyun/projects/tower-stack/index.html
+- 라인 수: 998
+- 주요 구조:
+  - MODES = { easy, normal, hard } 객체로 파라미터 분기
+  - makePlayer/initPlayer로 P1/P2 분리, patternRng/motionRng 두 PRNG 인스턴스 (같은 시드, 다른 salt)
+  - battleMode 토글로 single vs split-screen
+  - getMode().shrink (Hard 전용 블록 폭 축소), getMode().fog (안개)
+  - sfxDrop / sfxPerfect / sfxCombo / sfxGameover 효과음
+  - localStorage: best, mute, combo_record, mode 저장
+
+[Patterns]
+- 게임 로직 변경 시 MODES 객체에 신규 파라미터 추가 → spawnMoving/update/draw에서 getMode() 참조
+- 새 효과음은 beep() 헬퍼 사용 (sine/square/triangle/sawtooth)
+- 파티클은 spawnXxxParticles(cx, cy, ...) 헬퍼 패턴
+- 배틀 모드 그리기는 ctx.save/translate/clip으로 viewport 분리
+
+[Round 1 완료] — US-001 PASS (2026-04-26)
+- JS 구문 검사: ✓ (new Function(scriptBlock) 통과)
+- 마커 12개 모두 존재 (MODES, makePRNG, battleMode, players, currentSeed, getMode, sfxPerfect, localStorage, patternRng, motionRng, wobbleAmp, STORAGE_MODE)
+- L483: dropBlock의 mx 계산에 `Math.sin(moving.wobblePhase) * moving.wobbleAmp` 포함 — 충돌 판정과 그리기 위치 일치 ✓
+- L617-624: update에서도 동일하게 effective 위치로 경계 처리 ✓
+- modeButtons (data-mode) 클릭 핸들러 + battleMode 토글 wired ✓
+- 베이스라인 코드 결함 0건. Codex의 첫 작업은 견고함.
+
+[Round 2-4 완료] — US-002/003/004 ALL PASS (2026-04-26)
+파일: 998줄 → 1225줄 (+227), 33KB → 41KB
+
+US-002 핵심 변경:
+- L607-619: dropBlock의 isPerfect 분기에서 isGolden 시 +5 보너스 + spawnGoldenParticles + 토스트
+- L612: `[5, 10, 15].includes(player.combo)` 마일스톤 분기 → fanfareText, sfxCombo*2, 차등 vibrate
+- L637-640: 콤보 끊김 시 player.breakText, breakTimer 0.5초
+
+US-003 핵심 변경:
+- L1018-1052: drawBattleOverlay에 점수 차이 (P1+N/P2+N/동점) + 5초 카운트다운(색상 그라디언트, 마지막 1초 깜빡임)
+- L682: SIMULTANEOUS_GAMEOVER_MS 윈도우 내 동시 gameover면 forceDraw
+- L703-720: finishBattle에서 spawnFireworks(승자 viewport 중앙)
+
+US-004 핵심 변경:
+- localStorage: best_easy/normal/hard_v1 분리 + battle_record_v1 (JSON)
+- getBest/setBest, getBattleRecord/setBattleRecord 헬퍼
+- 게임오버/배틀결과 화면에 베스트·전적 표시
+- toolbar 전적 초기화 버튼
+
+회귀 검사: 모든 기존 마커 보존 ✓ (MODES, makePRNG, battleMode, sfxPerfect, data-mode, btnBattle, vibrate, touchstart, wobblePhase, wobbleAmp, STORAGE_MUTE)
+
+자동 검증 22/22 PASS ✓
+다음: architect agent 검증 진행
+
+[Architect 검증] — APPROVED (with non-blocking caveats)
+- PRD 22/22 코드 라인 인용으로 증명
+- HIGH-UX 결함 3건 발견: P2 동일 시드=동일 패턴, 카운트다운 동시사망 윈도우, 멀티터치 미지원
+
+[Round 5] — US-005 PASS
+- L460-465: P2 sideSalt = 0xC0DEBEEF (patternRng/motionRng salt 분기) → 같은 시드, 다른 패턴
+- L684-691: SIMULTANEOUS_GAMEOVER_MS 윈도우 명시 주석
+- L1146-1166: handleCanvasAction에 evt.changedTouches 순회 → 멀티터치 양손 동시 탭
+
+[Deslop Pass] — 변경 0건
+- console.log 0, TODO 0, 미사용 변수 0
+- 빈 catch 2개(audioContext, vibrate)는 의도된 silent ignore
+- "unused"로 보인 loop/handleCanvasAction은 RAF/listener 참조 false positive
+
+[Final]
+- 1235줄, 41779 bytes
+- 22/22 자동 검증 유지 + JS 구문 OK
+- git: rebase + push 완료 (commit e0a1d2d on origin/main)
+- Slack DM: 피니토 hyun, ts 1777212455.539409 (raw.githack.com 라이브 링크 2개)
+
+[종료] /oh-my-claudecode:cancel
