@@ -70,3 +70,6 @@ tmp/
 temp/
 *.tmp
 *.bak
+
+# omc artifacts (advisor 추적 폴더 — 게임 코드와 무관)
+.omc/
